@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Search,
   SlidersHorizontal,
@@ -283,105 +283,197 @@ export default function MapPage() {
 
       {/* Bottom Sheet */}
       {selectedPlace && (
-        <div className="absolute bottom-0 left-0 w-full z-30 pointer-events-auto animate-slide-up">
-          <div className="bg-white rounded-t-[2rem] shadow-[0_-4px_20px_rgba(0,0,0,0.1)] p-1 w-full max-w-md mx-auto relative">
-            <div className="w-full flex justify-center pt-3 pb-1">
-              <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+        <BottomSheet place={selectedPlace} onClose={() => setSelectedPlace(null)} />
+      )}
+    </div>
+  )
+}
+
+// --- Draggable Bottom Sheet ---
+
+const PEEK_HEIGHT = 200
+const NAV_HEIGHT = 72
+
+function BottomSheet({ place, onClose }: { place: Place; onClose: () => void }) {
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [translateY, setTranslateY] = useState(0)
+  const dragStart = useRef({ y: 0, translate: 0 })
+
+  const fullHeight = typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    setDragging(true)
+    dragStart.current = {
+      y: e.touches[0].clientY,
+      translate: translateY,
+    }
+  }, [translateY])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!dragging) return
+    const diff = e.touches[0].clientY - dragStart.current.y
+    const newTranslate = dragStart.current.translate + diff
+    setTranslateY(Math.max(-(fullHeight - PEEK_HEIGHT), Math.min(PEEK_HEIGHT, newTranslate)))
+  }, [dragging, fullHeight])
+
+  const handleTouchEnd = useCallback(() => {
+    setDragging(false)
+    if (translateY < -(fullHeight - PEEK_HEIGHT) * 0.3) {
+      setExpanded(true)
+      setTranslateY(-(fullHeight - PEEK_HEIGHT))
+    } else if (translateY > PEEK_HEIGHT * 0.5) {
+      onClose()
+    } else {
+      setExpanded(false)
+      setTranslateY(0)
+    }
+  }, [translateY, fullHeight, onClose])
+
+  const toggleExpand = useCallback(() => {
+    if (expanded) {
+      setExpanded(false)
+      setTranslateY(0)
+    } else {
+      setExpanded(true)
+      setTranslateY(-(fullHeight - PEEK_HEIGHT))
+    }
+  }, [expanded, fullHeight])
+
+  const currentTranslate = dragging
+    ? translateY
+    : expanded
+    ? -(fullHeight - PEEK_HEIGHT)
+    : 0
+
+  return (
+    <>
+      {/* Backdrop when expanded */}
+      {expanded && !dragging && (
+        <div
+          className="absolute inset-0 bg-black/20 z-25 pointer-events-auto"
+          onClick={onClose}
+        />
+      )}
+
+      <div
+        ref={sheetRef}
+        className="absolute left-0 w-full z-30 pointer-events-auto"
+        style={{
+          bottom: NAV_HEIGHT,
+          height: `${fullHeight}px`,
+          transform: `translateY(calc(100% - ${PEEK_HEIGHT}px + ${-currentTranslate}px * -1))`,
+          transition: dragging ? 'none' : 'transform 0.3s ease-out',
+          willChange: 'transform',
+        }}
+      >
+        <div className="bg-white rounded-t-[2rem] shadow-[0_-4px_20px_rgba(0,0,0,0.12)] w-full h-full max-w-md mx-auto relative flex flex-col">
+          {/* Drag Handle */}
+          <div
+            className="w-full flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing shrink-0"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onClick={toggleExpand}
+          >
+            <div className="w-12 h-1.5 bg-slate-300 rounded-full" />
+          </div>
+
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors z-10"
+          >
+            <X size={16} />
+          </button>
+
+          {/* Scrollable content */}
+          <div ref={contentRef} className="flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
+            {/* Header */}
+            <div className="flex justify-between items-start mb-2 pr-8">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 leading-tight">
+                  {place.name}
+                </h2>
+                <p className="text-slate-500 text-sm mt-1 font-medium">
+                  {place.typeLabel}
+                </p>
+              </div>
+              <StatusBadge label={place.statusLabel} color={place.statusColor} />
             </div>
 
-            <button
-              onClick={() => setSelectedPlace(null)}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
-            >
-              <X size={16} />
-            </button>
-
-            <div className="px-5 pb-6 pt-2">
-              <div className="flex justify-between items-start mb-2 pr-8">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 leading-tight">
-                    {selectedPlace.name}
-                  </h2>
-                  <p className="text-slate-500 text-sm mt-1 font-medium">
-                    {selectedPlace.typeLabel}
-                  </p>
+            {/* Stats Row */}
+            <div className="flex items-center gap-4 py-4">
+              {place.waitMins != null && (
+                <div className="flex-1 bg-slate-50 rounded-xl p-3 flex items-center gap-3 border border-slate-100">
+                  <div className="bg-blue-100 p-2 rounded-lg text-primary">
+                    <Hourglass size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">
+                      Est. Wait
+                    </p>
+                    <p className="text-slate-900 font-bold text-lg">{place.waitMins} min</p>
+                  </div>
                 </div>
-                <StatusBadge
-                  label={selectedPlace.statusLabel}
-                  color={selectedPlace.statusColor}
-                />
-              </div>
-
-              <div className="flex items-center gap-4 py-4">
-                {selectedPlace.waitMins != null && (
-                  <div className="flex-1 bg-slate-50 rounded-xl p-3 flex items-center gap-3 border border-slate-100">
-                    <div className="bg-blue-100 p-2 rounded-lg text-primary">
-                      <Hourglass size={20} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">
-                        Est. Wait
-                      </p>
-                      <p className="text-slate-900 font-bold text-lg">
-                        {selectedPlace.waitMins} min
-                      </p>
-                    </div>
+              )}
+              {place.closesLabel && (
+                <div className="flex-1 bg-slate-50 rounded-xl p-3 flex items-center gap-3 border border-slate-100">
+                  <div className="bg-orange-100 p-2 rounded-lg text-orange-500">
+                    <Clock size={20} />
                   </div>
-                )}
-                {selectedPlace.closesLabel && (
-                  <div className="flex-1 bg-slate-50 rounded-xl p-3 flex items-center gap-3 border border-slate-100">
-                    <div className="bg-orange-100 p-2 rounded-lg text-orange-500">
-                      <Clock size={20} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">
-                        Closes
-                      </p>
-                      <p className="text-slate-900 font-bold text-lg">
-                        {selectedPlace.closesLabel.replace('Closes ', '')}
-                      </p>
-                    </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">
+                      Closes
+                    </p>
+                    <p className="text-slate-900 font-bold text-lg">
+                      {place.closesLabel.replace('Closes ', '')}
+                    </p>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
 
-              <div className="flex flex-col gap-2 mb-6">
+            {/* Address & Contact */}
+            <div className="flex flex-col gap-2 mb-6">
+              <div className="flex items-center gap-3 text-slate-600 text-sm">
+                <MapPin size={16} className="text-slate-400 shrink-0" />
+                <span>{place.address}</span>
+              </div>
+              <div className="flex items-center gap-3 text-slate-600 text-sm">
+                <PhoneCall size={16} className="text-slate-400 shrink-0" />
+                <span>{place.phone}</span>
+              </div>
+              {place.hours && (
                 <div className="flex items-center gap-3 text-slate-600 text-sm">
-                  <MapPin size={16} className="text-slate-400 shrink-0" />
-                  <span>{selectedPlace.address}</span>
+                  <Clock size={16} className="text-slate-400 shrink-0" />
+                  <span>{place.hours}</span>
                 </div>
-                <div className="flex items-center gap-3 text-slate-600 text-sm">
-                  <PhoneCall size={16} className="text-slate-400 shrink-0" />
-                  <span>{selectedPlace.phone}</span>
-                </div>
-                {selectedPlace.hours && (
-                  <div className="flex items-center gap-3 text-slate-600 text-sm">
-                    <Clock size={16} className="text-slate-400 shrink-0" />
-                    <span>{selectedPlace.hours}</span>
-                  </div>
-                )}
-              </div>
+              )}
+            </div>
 
-              <div className="grid grid-cols-5 gap-3">
-                <a
-                  href={getDirectionsUrl(selectedPlace.address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="col-span-3 bg-primary hover:bg-primary-dark text-white rounded-xl py-3.5 px-4 font-semibold text-base shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Navigation size={18} /> Get Directions
-                </a>
-                <a
-                  href={getPhoneUrl(selectedPlace.phone)}
-                  className="col-span-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 rounded-xl py-3.5 px-4 font-semibold text-base flex items-center justify-center gap-2 transition-colors"
-                >
-                  <PhoneCall size={18} className="text-primary" /> Call
-                </a>
-              </div>
+            {/* Action Buttons */}
+            <div className="grid grid-cols-5 gap-3">
+              <a
+                href={getDirectionsUrl(place.address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="col-span-3 bg-primary hover:bg-primary-dark text-white rounded-xl py-3.5 px-4 font-semibold text-base shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-colors"
+              >
+                <Navigation size={18} /> Get Directions
+              </a>
+              <a
+                href={getPhoneUrl(place.phone)}
+                className="col-span-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 rounded-xl py-3.5 px-4 font-semibold text-base flex items-center justify-center gap-2 transition-colors"
+              >
+                <PhoneCall size={18} className="text-primary" /> Call
+              </a>
             </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   )
 }
