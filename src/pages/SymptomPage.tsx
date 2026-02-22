@@ -2,9 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
-  History,
   Send,
-  Mic,
   Bot,
   Lightbulb,
   BarChart3,
@@ -60,7 +58,7 @@ export default function SymptomPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-  async function handleSend(text?: string) {
+  function handleSend(text?: string) {
     const msg = (text ?? input).trim()
     if (!msg || loading) return
 
@@ -74,30 +72,18 @@ export default function SymptomPage() {
     setInput('')
     setLoading(true)
 
-    let analysis: SymptomResponse
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg }),
-      })
-      if (res.ok) {
-        analysis = await res.json()
-      } else {
-        analysis = analyzeSymptoms(msg)
-      }
-    } catch {
-      analysis = analyzeSymptoms(msg)
-    }
+    const analysis = analyzeSymptoms(msg)
 
-    const aiMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      analysis,
-      timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-    }
-    setMessages((prev) => [...prev, aiMsg])
-    setLoading(false)
+    setTimeout(() => {
+      const assistantMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        analysis,
+        timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      }
+      setMessages((prev) => [...prev, assistantMsg])
+      setLoading(false)
+    }, 600)
   }
 
   return (
@@ -110,19 +96,8 @@ export default function SymptomPage() {
         >
           <ArrowLeft size={22} />
         </button>
-        <div className="flex flex-col items-center">
-          <h1 className="text-base font-bold text-slate-900">Symptom Checker</h1>
-          <span className="flex items-center gap-1 text-[10px] font-medium text-teal-600 uppercase tracking-wide">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500" />
-            </span>
-            AI Active
-          </span>
-        </div>
-        <button className="flex size-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-50 transition-colors">
-          <History size={22} />
-        </button>
+        <h1 className="text-base font-bold text-slate-900">Symptom Checker</h1>
+        <div className="size-10" />
       </header>
 
       {/* Chat Area */}
@@ -196,17 +171,11 @@ export default function SymptomPage() {
           <div className="relative flex-1">
             <input
               ref={inputRef}
-              className="w-full rounded-xl border-0 bg-slate-100 py-3 pl-4 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-teal-400 outline-none"
-              placeholder="Type a new symptom..."
+              className="w-full rounded-xl border-0 bg-slate-100 py-3 pl-4 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-teal-400 outline-none"
+              placeholder="Describe your symptoms..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
-            <button
-              type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400"
-            >
-              <Mic size={20} />
-            </button>
           </div>
           <button
             type="submit"
