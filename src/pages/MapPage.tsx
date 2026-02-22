@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Search,
   SlidersHorizontal,
-  Layers,
   LocateFixed,
   Navigation,
   PhoneCall,
@@ -11,35 +10,30 @@ import {
   X,
   MapPin,
   Check,
+  Loader2,
 } from 'lucide-react'
-import { Loader } from '@googlemaps/js-api-loader'
 import { places, Place, QUESNEL_CENTER, getDirectionsUrl, getPhoneUrl } from '../data/places'
 import StatusBadge from '../components/StatusBadge'
 
 const typeFilters = [
-  { key: 'open', label: 'Open Now', icon: Check },
-  { key: 'hospital', label: 'ER', icon: null },
-  { key: 'pharmacy', label: 'Pharmacies', icon: null },
-  { key: 'clinic', label: 'Clinics', icon: null },
+  { key: 'open', label: 'Open Now' },
+  { key: 'hospital', label: 'ER' },
+  { key: 'pharmacy', label: 'Pharmacies' },
+  { key: 'clinic', label: 'Clinics' },
 ] as const
 
 type FilterKey = (typeof typeFilters)[number]['key']
 
-const markerColors: Record<Place['type'], string> = {
-  hospital: '#ef4444',
-  clinic: '#1392ec',
-  'urgent-care': '#1392ec',
-  pharmacy: '#10b981',
-}
-
 export default function MapPage() {
   const mapRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<google.maps.Map | null>(null)
-  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([])
+  const mapObjRef = useRef<google.maps.Map | null>(null)
+  const markersRef = useRef<google.maps.Marker[]>([])
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
-  const [mapError, setMapError] = useState(false)
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [errorMsg, setErrorMsg] = useState('')
+  const initCalled = useRef(false)
 
   const filteredPlaces = places.filter((p) => {
     if (searchQuery) {
@@ -47,21 +41,21 @@ export default function MapPage() {
       if (!p.name.toLowerCase().includes(q) && !p.typeLabel.toLowerCase().includes(q)) return false
     }
     if (activeFilters.size === 0) return true
-    let pass = true
-    if (activeFilters.has('open') && !p.openNow) pass = false
-    if (activeFilters.has('hospital') && p.type !== 'hospital') {
-      if (!activeFilters.has('clinic') && !activeFilters.has('pharmacy')) pass = false
-      else if (p.type !== 'clinic' && p.type !== 'urgent-care' && p.type !== 'pharmacy') pass = false
+
+    const typeFiltersActive = [
+      activeFilters.has('hospital') ? 'hospital' : null,
+      activeFilters.has('clinic') ? 'clinic' : null,
+      activeFilters.has('pharmacy') ? 'pharmacy' : null,
+    ].filter(Boolean) as string[]
+
+    if (activeFilters.has('open') && !p.openNow) return false
+
+    if (typeFiltersActive.length > 0) {
+      const placeTypes = p.type === 'urgent-care' ? ['urgent-care', 'clinic'] : [p.type]
+      if (!typeFiltersActive.some((tf) => placeTypes.includes(tf))) return false
     }
-    if (activeFilters.has('clinic') && p.type !== 'clinic' && p.type !== 'urgent-care') {
-      if (!activeFilters.has('hospital') && !activeFilters.has('pharmacy')) pass = false
-      else if (p.type !== 'hospital' && p.type !== 'pharmacy') pass = false
-    }
-    if (activeFilters.has('pharmacy') && p.type !== 'pharmacy') {
-      if (!activeFilters.has('hospital') && !activeFilters.has('clinic')) pass = false
-      else if (p.type !== 'hospital' && p.type !== 'clinic' && p.type !== 'urgent-care') pass = false
-    }
-    return pass
+
+    return true
   })
 
   const toggleFilter = (key: FilterKey) => {
@@ -73,103 +67,171 @@ export default function MapPage() {
     })
   }
 
-  const initMap = useCallback(async () => {
+  useEffect(() => {
+    if (initCalled.current) return
+    initCalled.current = true
+
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-    if (!apiKey || !mapRef.current) {
-      setMapError(true)
+    if (!apiKey) {
+      setErrorMsg('No Google Maps API key found. Add VITE_GOOGLE_MAPS_API_KEY to your .env file.')
+      setStatus('error')
       return
     }
 
-    try {
-      const loader = new Loader({
-        apiKey,
-        version: 'weekly',
-        libraries: ['marker'],
-      })
-      const { Map } = await loader.importLibrary('maps')
-      const { AdvancedMarkerElement } = await loader.importLibrary('marker')
+    const scriptId = 'google-maps-script'
+    if (document.getElementById(scriptId)) {
+      tryInitMap()
+      return
+    }
 
-      const map = new Map(mapRef.current, {
-        center: QUESNEL_CENTER,
-        zoom: 14,
-        mapId: 'find-care-quesnel',
-        disableDefaultUI: true,
-        zoomControl: false,
-        gestureHandling: 'greedy',
-      })
-      mapInstanceRef.current = map
+    const script = document.createElement('script')
+    script.id = scriptId
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=__initGoogleMap`
+    script.async = true
+    script.defer = true
 
-      places.forEach((place) => {
-        const pin = document.createElement('div')
-        pin.className = 'flex items-center justify-center w-8 h-8 rounded-full border-[3px] border-white shadow-xl cursor-pointer'
-        pin.style.backgroundColor = markerColors[place.type]
+    ;(window as any).__initGoogleMap = () => {
+      tryInitMap()
+    }
 
-        const marker = new AdvancedMarkerElement({
-          position: { lat: place.lat, lng: place.lng },
-          map,
-          content: pin,
-          title: place.name,
+    script.onerror = () => {
+      setErrorMsg('Failed to load Google Maps. Check your API key and ensure Maps JavaScript API is enabled.')
+      setStatus('error')
+    }
+
+    document.head.appendChild(script)
+
+    function tryInitMap() {
+      if (!mapRef.current || !window.google?.maps) {
+        setErrorMsg('Google Maps failed to initialize.')
+        setStatus('error')
+        return
+      }
+
+      try {
+        const map = new window.google.maps.Map(mapRef.current, {
+          center: QUESNEL_CENTER,
+          zoom: 14,
+          disableDefaultUI: true,
+          zoomControl: true,
+          zoomControlOptions: {
+            position: window.google.maps.ControlPosition.RIGHT_CENTER,
+          },
+          gestureHandling: 'greedy',
+          styles: [
+            { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+            { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+          ],
+        })
+        mapObjRef.current = map
+
+        places.forEach((place) => {
+          const marker = new window.google.maps.Marker({
+            position: { lat: place.lat, lng: place.lng },
+            map,
+            title: place.name,
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 14,
+              fillColor:
+                place.type === 'hospital'
+                  ? '#ef4444'
+                  : place.type === 'pharmacy'
+                  ? '#10b981'
+                  : '#1392ec',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 3,
+            },
+          })
+
+          marker.addListener('click', () => {
+            setSelectedPlace(place)
+            map.panTo({ lat: place.lat, lng: place.lng })
+          })
+
+          markersRef.current.push(marker)
         })
 
-        marker.addListener('gmp-click', () => {
-          setSelectedPlace(place)
-          map.panTo({ lat: place.lat, lng: place.lng })
-        })
-
-        markersRef.current.push(marker)
-      })
-    } catch {
-      setMapError(true)
+        setStatus('ready')
+      } catch (err) {
+        console.error('Map init error:', err)
+        setErrorMsg('Failed to create map instance.')
+        setStatus('error')
+      }
     }
   }, [])
 
   useEffect(() => {
-    initMap()
-  }, [initMap])
+    if (status !== 'ready') return
+    markersRef.current.forEach((marker, i) => {
+      const place = places[i]
+      const visible = filteredPlaces.some((fp) => fp.id === place.id)
+      marker.setVisible(visible)
+    })
+  }, [filteredPlaces, status])
 
   const handleLocate = () => {
-    if (!navigator.geolocation || !mapInstanceRef.current) return
+    if (!navigator.geolocation || !mapObjRef.current) return
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        mapInstanceRef.current?.panTo({
+        mapObjRef.current?.panTo({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
         })
-        mapInstanceRef.current?.setZoom(15)
+        mapObjRef.current?.setZoom(15)
       },
       () => {
-        mapInstanceRef.current?.panTo(QUESNEL_CENTER)
+        mapObjRef.current?.panTo(QUESNEL_CENTER)
       }
     )
   }
 
   return (
-    <div className="relative w-full h-dvh flex flex-col overflow-hidden bg-slate-200">
-      {/* Map or fallback */}
-      {mapError ? (
-        <div className="flex-1 flex items-center justify-center bg-slate-100 p-8">
+    <div className="relative w-full h-dvh h-screen flex flex-col overflow-hidden bg-slate-200">
+      {/* Map container - always rendered so ref is available */}
+      <div
+        ref={mapRef}
+        className="absolute inset-0 w-full h-full z-0"
+        style={{ minHeight: '100vh' }}
+      />
+
+      {/* Loading state */}
+      {status === 'loading' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100">
           <div className="text-center">
+            <Loader2 size={32} className="text-primary animate-spin mx-auto mb-3" />
+            <p className="text-sm text-slate-500 font-medium">Loading map...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {status === 'error' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100 p-8 pb-24">
+          <div className="text-center w-full max-w-sm">
             <MapPin size={48} className="text-slate-300 mx-auto mb-4" />
             <h3 className="font-bold text-slate-700 mb-2">Map unavailable</h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Add your Google Maps API key to <code className="bg-slate-200 px-1 rounded text-xs">.env</code> to enable the map.
-            </p>
+            <p className="text-sm text-slate-500 mb-4">{errorMsg}</p>
             <div className="space-y-2">
               {filteredPlaces.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => setSelectedPlace(p)}
-                  className="w-full text-left bg-white rounded-xl p-3 border border-slate-200 shadow-sm"
+                  className="w-full text-left bg-white rounded-xl p-3 border border-slate-200 shadow-sm active:scale-[0.98] transition-transform"
                 >
-                  <p className="font-semibold text-sm">{p.name}</p>
-                  <p className="text-xs text-slate-500">{p.typeLabel}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-sm">{p.name}</p>
+                      <p className="text-xs text-slate-500">{p.typeLabel}</p>
+                    </div>
+                    <StatusBadge label={p.statusLabel} color={p.statusColor} />
+                  </div>
                 </button>
               ))}
             </div>
           </div>
         </div>
-      ) : (
-        <div ref={mapRef} className="absolute inset-0 w-full h-full z-0" />
       )}
 
       {/* Search & Filters */}
@@ -207,24 +269,22 @@ export default function MapPage() {
         </div>
       </div>
 
-      {/* Right side controls */}
-      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-3 z-20 pointer-events-auto">
-        <button className="w-10 h-10 bg-white rounded-xl shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50 active:scale-95 transition-all ring-1 ring-black/5">
-          <Layers size={20} />
-        </button>
-        <button
-          onClick={handleLocate}
-          className="w-10 h-10 bg-white rounded-xl shadow-lg flex items-center justify-center text-primary hover:bg-slate-50 active:scale-95 transition-all ring-1 ring-black/5"
-        >
-          <LocateFixed size={20} />
-        </button>
-      </div>
+      {/* Locate button */}
+      {status === 'ready' && (
+        <div className="absolute right-4 bottom-32 flex flex-col gap-3 z-20 pointer-events-auto">
+          <button
+            onClick={handleLocate}
+            className="w-10 h-10 bg-white rounded-xl shadow-lg flex items-center justify-center text-primary hover:bg-slate-50 active:scale-95 transition-all ring-1 ring-black/5"
+          >
+            <LocateFixed size={20} />
+          </button>
+        </div>
+      )}
 
       {/* Bottom Sheet */}
       {selectedPlace && (
         <div className="absolute bottom-0 left-0 w-full z-30 pointer-events-auto animate-slide-up">
           <div className="bg-white rounded-t-[2rem] shadow-[0_-4px_20px_rgba(0,0,0,0.1)] p-1 w-full max-w-md mx-auto relative">
-            {/* Pull Indicator */}
             <div className="w-full flex justify-center pt-3 pb-1">
               <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
             </div>
@@ -252,7 +312,6 @@ export default function MapPage() {
                 />
               </div>
 
-              {/* Stats Row */}
               <div className="flex items-center gap-4 py-4">
                 {selectedPlace.waitMins != null && (
                   <div className="flex-1 bg-slate-50 rounded-xl p-3 flex items-center gap-3 border border-slate-100">
@@ -286,7 +345,6 @@ export default function MapPage() {
                 )}
               </div>
 
-              {/* Address & Contact */}
               <div className="flex flex-col gap-2 mb-6">
                 <div className="flex items-center gap-3 text-slate-600 text-sm">
                   <MapPin size={16} className="text-slate-400 shrink-0" />
@@ -304,7 +362,6 @@ export default function MapPage() {
                 )}
               </div>
 
-              {/* Action Buttons */}
               <div className="grid grid-cols-5 gap-3">
                 <a
                   href={getDirectionsUrl(selectedPlace.address)}
