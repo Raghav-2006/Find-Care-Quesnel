@@ -23,8 +23,8 @@ export const places: Place[] = [
     typeLabel: 'Emergency Room • 24/7',
     address: '543 Front Street, Quesnel, BC V2J 2K7',
     phone: '(250) 985-5600',
-    lat: 52.9825,
-    lng: -122.5003,
+    lat: 52.98168,
+    lng: -122.50007,
     openNow: true,
     statusLabel: 'Open Now',
     statusColor: 'green',
@@ -37,8 +37,8 @@ export const places: Place[] = [
     typeLabel: 'Walk-in Clinic',
     address: '644 Front Street, Quesnel, BC V2J 2K8',
     phone: '(250) 992-8322',
-    lat: 52.9831,
-    lng: -122.4992,
+    lat: 52.98321,
+    lng: -122.49858,
     openNow: false,
     statusLabel: 'Closes 5pm',
     statusColor: 'orange',
@@ -52,8 +52,8 @@ export const places: Place[] = [
     address: '543 Front Street, Quesnel, BC V2J 2K7',
     phone: '(250) 991-7571',
     hours: 'Mon–Fri 12pm–8pm; Weekends/Holidays 10am–2pm',
-    lat: 52.9827,
-    lng: -122.5006,
+    lat: 52.98175,
+    lng: -122.50015,
     openNow: true,
     statusLabel: 'Open Now',
     statusColor: 'green',
@@ -66,15 +66,15 @@ export const places: Place[] = [
     typeLabel: 'Pharmacy',
     address: '225 St. Laurent Ave, Quesnel, BC V2J 2C8',
     phone: '(250) 992-2214',
-    lat: 52.9792,
-    lng: -122.4960,
+    lat: 52.97906,
+    lng: -122.49652,
     openNow: true,
     statusLabel: 'Open',
     statusColor: 'green',
   },
 ];
 
-export const QUESNEL_CENTER = { lat: 52.9815, lng: -122.4985 };
+export const QUESNEL_CENTER = { lat: 52.9810, lng: -122.4990 };
 
 export function getDirectionsUrl(address: string): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
